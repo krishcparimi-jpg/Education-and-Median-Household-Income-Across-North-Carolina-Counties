@@ -1,0 +1,165 @@
+---
+title: "Project 3"
+author: "Krish Parimi"
+date: "2025-11-11"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+1.  This study explores the relationship between educational attainment and median household income among North Carolina counties. The purpose of the study is to determine whether counties with higher educational attainment also have higher median household incomes and the strength of this relationship across the state. This is a relevant and significant question, as educational attainment and income tend to affect many other social and economic aspects of life, and large differences between counties can lead to significant access to opportunities. By considering both variables simultaneously, the study illustrates how educational and economic conditions vary over space. The case study will use the state of North Carolina and county-level data from the 2023 American Community Survey. North Carolina is an ideal location for this study, as there are fast growing urban areas and rural counties from different educational attainment backgrounds. The combination of spatial data and statistical methods allows researchers to compile and investigate educational attainment and income across the state.
+
+## Background
+
+As academia examines geographic inequality, understanding how educational attainment varies in relation to income is an important element of study. Education is presumably connected to increased income both at the individual level and when looking at communities in aggregate. We see that counties with a larger population proportion that are college educated have better labor markets and more economic opportunity to offer residents. The American Community Survey is a reliable means to gather county level estimates of median household income and educational attainment, and more specifically, these measures can be examined in comparison across North Carolina (Census Bureau, 2023). Examining these focused categories of data together allows to see whether educational differences act as an explanatory tool for the unequal distribution of income across the state. The tidycensus package allows us to extract the American Community Survey data in a direct format from the Census Bureau in a spatial format that is amenable to mapping and statistical analysis (Walker and Herman, 2024). The data is presented with county geometries and referenced to the North Carolina State Plane system to connect social explanatory variables of interest to geographic data in a consistent way (North Carolina Geodetic Survey, 2024). Together the literature and associated data provide a strong framework and rationale to examine education and income in space and how strongly the two are related.
+
+## Data and Methods
+
+I utilized county-level data from the American Community Survey 5-Year Estimates (via tidycensus package). The underlying data are all accessed through the Census Bureau API and are fully reproducible. I analyze measuring household income (table B19013) and educational attainment (table B15003). Percent of adults having at least a bachelor’s degree is calculated by counting the individuals having a bachelor’s, master’s, professional, or doctorate degree, and then dividing that by total population being 25 years or older. This meant that for both datasets I can also use the county geometries and map the measures.
+
+After downloading the data, I projected to the North Carolina State Plane coordinate system and then dropped missing values. I then joined the variables into one dataset (nc_data). I completed an exploratory data analysis including summary statistics, histograms, and boxplots for each of income and educational attainment. Doing this I learned about the range of each variable and the distribution.
+
+I mapped both measures using tmap and created a title for the map, a legend, and a projection in the exercise. For my main method, I used linear regression with median income as the dependent variable and the % bachelor’s degree as the predictor, as completed in assignment 8.
+
+```{r}
+library(tidycensus)
+library(tidyverse)
+library(sf)
+library(tmap)
+```
+
+```{r}
+# use your API key to access the data
+# note – you only need to run this the first time
+#census_api_key("9ec0d17f405c83f4ad79888a6595c4c7b1ea5c46", install = TRUE, overwrite = TRUE)
+readRenviron("~/.Renviron")
+Sys.getenv("CENSUS_API_KEY")
+```
+
+```{r}
+# Median Household Income
+income <- get_acs(
+  geography = "county",
+  state = "NC",
+  variables = c(medincome = "B19013_001"),
+  year = 2023,
+  survey = "acs5",
+  geometry = TRUE
+) |>
+  st_transform(32119) 
+```
+
+```{r}
+education <- get_acs(
+  geography = "county",
+  state = "NC",
+  variables = c(
+    total = "B15003_001",
+    bach = "B15003_022",
+    master = "B15003_023",
+    prof = "B15003_024",
+    phd = "B15003_025"
+  ),
+  year = 2023,
+  survey = "acs5",
+  geometry = TRUE
+) |>
+  st_transform(32119)
+```
+
+```{r}
+edu_clean <- education |>
+  st_drop_geometry() |>
+  group_by(GEOID) |>
+  summarize(
+    total = sum(estimate[variable == "total"]),
+    bach_or_higher = sum(estimate[variable %in% c("bach","master","prof","phd")])
+  ) |>
+  mutate(perc_bach = (bach_or_higher / total) * 100)
+```
+
+```{r}
+# Join by GEOID
+nc_data <- left_join(
+  income |> select(GEOID, medincome = estimate, geometry),
+  edu_clean |> select(GEOID, perc_bach),
+  by = "GEOID"
+)
+```
+
+```{r}
+head(nc_data)
+summary(nc_data$medincome)
+summary(nc_data$perc_bach)
+```
+
+```{r}
+hist(nc_data$medincome,
+     main = "Histogram of Median Household Income",
+     xlab = "Income (USD)")
+```
+
+```{r}
+hist(nc_data$perc_bach,
+     main = "Histogram of % Bachelor's Degree or Higher",
+     xlab = "Percent (%)")
+```
+
+```{r}
+boxplot(nc_data$medincome,
+        main = "Boxplot of Median Household Income",
+        ylab = "Income (USD)")
+```
+
+```{r}
+boxplot(nc_data$perc_bach,
+        main = "Boxplot of % Bachelor's Degree or Higher",
+        ylab = "Percent (%)")
+```
+
+```{r}
+tmap_mode("plot")
+
+tm_shape(nc_data) +
+  tm_polygons("medincome",
+              title = "Median Household Income (USD)",
+              palette = "Blues") +
+  tm_layout(title = "North Carolina - Median Household Income",
+            legend.outside = TRUE)
+```
+
+```{r}
+tmap_mode("plot")
+
+tm_shape(nc_data) +
+  tm_polygons("perc_bach",
+              title = "% with Bachelor's Degree or Higher",
+              palette = "Greens") +
+  tm_layout(title = "North Carolina - Educational Attainment",
+            legend.outside = TRUE)
+```
+
+```{r}
+edu_income_model <- lm(medincome ~ perc_bach, data = nc_data)
+summary(edu_income_model)
+```
+
+## Results
+
+The linear regression analysis provides evidence that a strong positive relationship exists between educational attainment and median household income across the counties of North Carolina. The coefficient for educational attainment is given as 932.22, which means that for each 1 percentage point increase in the share of adults with at least a bachelor’s degree, median household income increases by nearly \$932, a highly significant effect (p \< 2e-16). The model also accounts for a large portion of the variation in income in the counties, with the R-squared value being around 0.54. This means that the differences in educational attainment accounted for approximately 54% of the difference in income across the counties of North Carolina. In summary, counties with larger shares of residents with a college education have much higher household incomes and indicate a significant relationship between education and local economic conditions.\
+
+## Conclusion
+
+This project examined the connection between education and median household income across counties in North Carolina. The findings show a very clear and strong positive connection. In every instance, counties with higher levels of education had higher household incomes. In fact, this pattern was stronger than I had expected, especially since education was the only variable included and it explained more than half of the variation in income across counties. The regression analyses were significant with a p-value of about zero, and a meaningful coefficient indicating that a one percentage point increase in bachelor’s degree attainment (for the population age 25 years old and older) was correlated with about a \$900 increase in median income. This suggests education is among the most important factor in shaping local economic factors in the state. This research also implies regional differences in educational attainment may intensify larger economic differences. If I were to do this project again, I would include additional variables such as urbanization, industry types, or age structure to build a more complete model of economic measures and how much education matters when accounting for additional factors.
+
+## References
+
+Census Bureau. 2023. American Community Survey 5 Year Estimates, Tables B19013 and B15003. United States Census Bureau. Retrieved using the tidycensus R package. <https://www.census.gov/programs-surveys/acs/>
+
+Walker, Kyle, and Matt Herman. 2024. tidycensus: Load US Census Boundary and Attribute Data as R Spatial Data Frames. R package version 1.5. [https://walker-data.com/tidycensus/](https://walker-data.com/tidycensus/?utm_source=chatgpt.com)
+
+North Carolina Geodetic Survey. 2024. North Carolina State Plane Coordinate System (NAD 83). North Carolina Department of Public Safety. <https://www.nconemap.gov/>
